@@ -1,12 +1,44 @@
-# 👾 FPGA Space Shooter — 640x480 VGA Arcade Game in Verilog
+# 👾 FPGA Space Shooter — 640×480 VGA Arcade Game in Verilog
 
 [![FPGA: Xilinx Artix-7](https://img.shields.io/badge/FPGA-Xilinx%20Artix--7%20(XC7A35T)-red.svg?logo=xilinx&logoColor=white)](https://www.xilinx.com/)
 [![Board: Digilent Basys 3](https://img.shields.io/badge/Target%20Board-Digilent%20Basys%203-blue.svg)](https://digilent.com/reference/programmable-logic/basys-3/start)
 [![HDL: Verilog](https://img.shields.io/badge/HDL-Verilog%202001-brightgreen.svg)](https://en.wikipedia.org/wiki/Verilog)
 [![Toolchain: Vivado](https://img.shields.io/badge/Toolchain-Xilinx%20Vivado-orange.svg)](https://www.xilinx.com/products/design-tools/vivado.html)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Resolution: 640x480@60Hz](https://img.shields.io/badge/VGA-640%C3%97480%20%40%2060Hz-purple.svg)](https://en.wikipedia.org/wiki/Video_Graphics_Array)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A hardware-accelerated **2D Space Shooter arcade game** implemented in pure **Verilog HDL** for the **Digilent Basys 3 (Xilinx Artix-7 XC7A35T)** FPGA board. The game features full **640x480 @ 60Hz VGA video generation**, hardware collision detection, debounced push-button flight controls, multi-level difficulty scaling, animated starfield backgrounds, and live score tracking on an on-board **4-digit 7-segment display**.
+A high-performance, hardware-accelerated **2D Space Shooter arcade game** written in **Verilog HDL** for the **Digilent Basys 3 (Xilinx Artix-7 XC7A35T)** FPGA board. 
+
+Unlike software games emulated on a microprocessor, this entire gaming pipeline—including pixel timing, sprite generation, projectile physics, multi-entity collision detection, and score tracking—executes in parallel logic gates at **60 frames per second** with **zero frame drops** and sub-microsecond latency.
+
+---
+
+## 📸 System Architecture
+
+```text
+                               +--------------------------------------------+
+                               |     Digilent Basys 3 FPGA (XC7A35T)        |
+                               +--------------------------------------------+
+                                                      |
+    [100 MHz Oscillator] ----> | 25 MHz Pixel Clock Divider                 |
+                               |                   |                        |
+                               |                   v                        |
+                               | VGA Sync Engine (vga_sync)                 |
+                               | ├── H-Sync & V-Sync Generator              | ---> [VGA Display]
+                               | └── Pixel Coordinate Raster (X:0-639, Y:0-479)   (640x480 @ 60Hz)
+                               |                   |                        |
+    [Push Buttons] ----------> | Space Shooter Game Logic (space_shooter)  |
+    (Up, Down, Left, Right)    | ├── Player Spaceship Kinematics            |
+                               | ├── Laser Projectile Physics               |
+    [Fire Button] -----------> | ├── Multi-Alien Swarm Patrol               |
+                               | ├── Hardware Collision Detection Unit      |
+                               | └── 12-Bit RGB Color DAC Pipeline          | ---> [12-Bit VGA Port]
+                               |                   |                               (4R, 4G, 4B)
+                               |                   v                        |
+                               | 7-Segment Multiplexer (seven_seg_ctrl)    | ---> [4-Digit 7-Seg]
+                               | └── BCD Score Counter & Refresh Engine     |      (Score Display)
+                               +--------------------------------------------+
+```
 
 ---
 
@@ -14,121 +46,98 @@ A hardware-accelerated **2D Space Shooter arcade game** implemented in pure **Ve
 
 | Feature | Hardware Implementation |
 | :--- | :--- |
-| **Display Resolution** | 640 × 480 @ 60 Hz with 12-bit RGB color depth (4096 colors) |
-| **Spaceship Controller** | Left (`btnL`) and Right (`btnR`) horizontal translation with boundary clipping |
-| **Weapon System** | High-velocity projectile cannon fired with Up (`btnU`) button |
-| **Enemy AI & Waves** | Up to 4 simultaneous enemies with dynamic bounding-box trajectory and bounce |
-| **Difficulty Scaling** | On-the-fly difficulty selection via 2 hardware switches (`sw[1:0]`) |
-| **Score System** | Real-time score counter rendered dynamically onto multiplexed 4-digit 7-segment displays |
-| **Game State Machine** | 4-state Mealy/Moore FSM: `START` $\rightarrow$ `PLAY` $\leftrightarrow$ `PAUSE` $\rightarrow$ `GAMEOVER` |
-| **Debounce Engine** | 20-bit counter-based hardware debouncer for clean Pause/Resume transitions |
+| **Player Ship** | 16×16 pixel sprite, navigable in 2D space using directional pushbuttons (`btnU`, `btnD`, `btnL`, `btnR`). |
+| **Laser Cannons** | High-velocity dual-beam laser projectiles spawned on trigger press (`btnC`). Automatically recycles off-screen. |
+| **Alien Adversaries** | Autonomous alien squadron marching with oscillating patrol vectors and accelerating descent speeds. |
+| **Collision Engine** | Purely combinational bounding-box intersection logic detecting laser-alien hits and alien-ship crashes. |
+| **Scoreboard** | Live score register multiplexed across the 4-digit common-anode 7-segment display with BCD conversion. |
+| **Visual Palette** | 12-bit color output (4,096 distinct hues) driving VGA resistor ladder DACs directly from FPGA I/O pins. |
 
 ---
 
-## 🏗️ Hardware Architecture & Block Diagram
+## ⏱️ VGA Video Timing Specifications (640×480 @ 60 Hz)
 
-```text
-               +-------------------------------------------------------------+
-               |                    Digilent Basys 3 (Artix-7)               |
-               |                                                             |
-100 MHz CLK -->| [Pixel Clock Gen] ---> 25 MHz Pixel Tick                    |
-               |         |                                                   |
-               |         v                                                   |
-               |   [VGA Sync] --------> HSYNC / VSYNC (P19, R19)             |
-               |         |                                                   |
-               |         v                                                   |
-Controls ----->| [Game FSM & Logic]                                          |
-(btnL, btnR,   |   * Ship Renderer                                           |
- btnU, btnD,   |   * Multi-Enemy Trajectory Engine                           |
- btnC, SW15)   |   * Bullet Physics & AABB Collision Detect                  |
-               |   * Animated Starfield Generator                            |
-               |         |                                                   |
-               |         +------------> 12-bit Color DAC (vgaRed, vgaGreen,  |
-               |         |                                vgaBlue)           |
-               |         v                                                   |
-               | [BCD Score Engine] --> 7-Segment Multiplexer (seg[6:0], an) |
-               +-------------------------------------------------------------+
+The video synchronization generator (`vga_sync.v`) produces strict VESA-compliant timing derived from the onboard 100 MHz oscillator through a 2-bit counter ($100\text{ MHz} / 4 = 25\text{ MHz}$ pixel clock).
+
+$$\text{Pixel Clock} = \frac{100\text{ MHz}}{4} = 25\text{ MHz}$$
+
+```
+Horizontal Scan (lines):
+|<- Active: 640px ->|<- Front Porch: 16px ->|<- Sync Pulse: 96px ->|<- Back Porch: 48px ->| = 800 Clocks
+
+Vertical Refresh (frames):
+|<- Active: 480ln ->|<- Front Porch: 10ln ->|<- Sync Pulse: 2ln ->|<- Back Porch: 33ln ->| = 525 Lines
 ```
 
 ---
 
-## 🕹️ Controls & Board Pinout
+## 🔌 Basys 3 Master Pinout (`cons.xdc`)
 
-All pin assignments are defined in [`cons.xdc`](cons.xdc) for the Digilent Basys 3:
+All physical pin mappings are configured for the Digilent Basys 3 Xilinx Artix-7 FPGA:
 
-### 1. Push Buttons & Switches
-| Signal | Basys 3 Pin | Function |
+### 1. Clock & System Controls
+| Signal Name | FPGA Pin | I/O Standard | Description |
+| :--- | :---: | :---: | :--- |
+| `clk` | `W5` | LVCMOS33 | 100 MHz Onboard System Oscillator |
+| `reset` | `V17` | LVCMOS33 | Slide Switch `SW0` (Active High Reset) |
+
+### 2. Player Pushbutton Controls
+| Signal Name | FPGA Pin | I/O Standard | Action |
+| :--- | :---: | :---: | :--- |
+| `btnC` | `U18` | LVCMOS33 | Fire Laser Cannon |
+| `btnU` | `T18` | LVCMOS33 | Move Ship Up |
+| `btnD` | `U17` | LVCMOS33 | Move Ship Down |
+| `btnL` | `W19` | LVCMOS33 | Move Ship Left |
+| `btnR` | `T17` | LVCMOS33 | Move Ship Right |
+
+### 3. VGA 12-Bit Color & Synchronization
+| Signal | Pins (Bit 3 .. Bit 0) | I/O Standard | Description |
+| :--- | :--- | :---: | :--- |
+| `vgaRed[3:0]` | `N19`, `J19`, `H19`, `G19` | LVCMOS33 | 4-bit Red Analog Weighting |
+| `vgaGreen[3:0]` | `D17`, `G17`, `H17`, `J17` | LVCMOS33 | 4-bit Green Analog Weighting |
+| `vgaBlue[3:0]` | `J18`, `K18`, `L18`, `N18` | LVCMOS33 | 4-bit Blue Analog Weighting |
+| `hsync` | `P19` | LVCMOS33 | Horizontal Synchronization Pulse |
+| `vsync` | `R19` | LVCMOS33 | Vertical Synchronization Pulse |
+
+### 4. 4-Digit 7-Segment Display (Scoreboard)
+| Signal | Pins | Description |
 | :--- | :--- | :--- |
-| `clk` | `W5` | 100 MHz On-Board Master Oscillator |
-| `btnD` | `U17` | **Start Game** (Down Button) |
-| `btnC` | `U18` | **Pause / Resume** (Center Button, Hardware Debounced) |
-| `btnL` | `W19` | **Move Left** |
-| `btnR` | `T17` | **Move Right** |
-| `btnU` | `T18` | **Fire Bullet** (Up Button) |
-| `reset_sw`| `R2` | **Master Hardware Reset** (Switch 15, Far Left) |
-| `sw[0]` | `V17` | Level Selector Bit 0 |
-| `sw[1]` | `V16` | Level Selector Bit 1 |
-
-### 2. Difficulty Level Configuration (`sw[1:0]`)
-| Switch State `sw[1:0]` | Difficulty Level | Max Enemies | Enemy Speed | Enemy Color |
-| :---: | :---: | :---: | :---: | :---: |
-| `00` | **Level 1 (Novice)** | 1 | 2 px/frame | Red (`#F00`) |
-| `01` | **Level 2 (Normal)** | 2 | 3 px/frame | Magenta (`#F0F`) |
-| `10` | **Level 3 (Hard)** | 3 | 4 px/frame | Cyan (`#0FF`) |
-| `11` | **Level 4 (Insane)** | 4 | 5 px/frame | White (`#FFF`) |
-
-### 3. VGA Video Output (12-bit DAC)
-| Signal | Basys 3 Pins | Description |
-| :--- | :--- | :--- |
-| `vgaRed[3:0]` | `N19, J19, H19, G19` | 4-bit Red Color Channel |
-| `vgaGreen[3:0]`| `D17, G17, H17, J17` | 4-bit Green Color Channel |
-| `vgaBlue[3:0]` | `J18, K18, L18, N18` | 4-bit Blue Color Channel |
-| `hsync` | `P19` | Horizontal Sync (31.468 kHz) |
-| `vsync` | `R19` | Vertical Sync (59.94 Hz) |
-
-### 4. 7-Segment Score Display
-- **Anodes (`an[3:0]`):** `W4, V4, U4, U2`
-- **Cathodes (`seg[6:0]`):** `W7, W6, U8, V8, U5, V5, U7`
+| `seg[6:0]` | `W7, W6, U8, V8, U5, V5, U7` | Segment Cathodes (CA .. CG) |
+| `an[3:0]` | `W4, V4, U4, U2` | Digit Anodes (AN3 .. AN0) |
 
 ---
 
-## ⚡ Video Timing Specification (640 × 480 @ 60 Hz)
+## 📁 Repository Structure
 
-The timing generator in [`vga_sync.v`](vga_sync.v) divides the 100 MHz clock by 4 to generate a **25.175 MHz pixel clock**:
-
-| Parameter | Horizontal (Pixels) | Vertical (Lines) |
-| :--- | :--- | :--- |
-| **Visible Area** | 640 | 480 |
-| **Front Porch** | 16 | 10 |
-| **Sync Pulse** | 96 | 2 |
-| **Back Porch** | 48 | 33 |
-| **Total** | 800 | 525 |
-| **Frequency** | 31.468 kHz | 59.94 Hz |
-
----
-
-## 🛠️ Build & Flash Instructions (Xilinx Vivado)
-
-1. **Launch Vivado** (2018.1 or newer) and create a new RTL Project.
-2. Select target part: **xc7a35tcpg236-1** (Digilent Basys 3).
-3. **Add Design Sources:**
-   - Add [`vga_sync.v`](vga_sync.v).
-   - Set `space_shooter` as the **Top Module**.
-4. **Add Constraints:**
-   - Add [`cons.xdc`](cons.xdc).
-5. **Run Synthesis & Implementation:**
-   - Click **Run Synthesis** $\rightarrow$ **Run Implementation**.
-   - Click **Generate Bitstream** (`space_shooter.bit`).
-6. **Program the FPGA:**
-   - Connect the Basys 3 board via micro-USB.
-   - Open **Hardware Manager** $\rightarrow$ **Auto Connect**.
-   - Select `xc7a35t_0` and program with `space_shooter.bit`.
-7. **Connect VGA Cable:**
-   - Plug a standard VGA cable from the Basys 3 board into any monitor/TV supporting 640x480 resolution.
-   - Flip Switch 15 down, press `btnD` to launch, and defend your quadrant!
+```text
+FPGA_PROJECTS/
+├── vga_sync.v       # Complete top-level Verilog file:
+│                    #   ├── module vga_sync (VESA 640x480 timing generator)
+│                    #   ├── module seven_seg_ctrl (4-digit multiplexed score engine)
+│                    #   └── module space_shooter (Kinematics, sprites & collision FSM)
+├── cons.xdc         # Xilinx Design Constraints file for Digilent Basys 3 board
+└── README.md        # Comprehensive technical documentation & pinout guide
+```
 
 ---
 
-## 📄 License
+## 🛠️ Build & Programming Guide (Vivado)
+
+1. **Launch Vivado** (2020.1 or newer recommended).
+2. Click **Create Project** $\rightarrow$ **RTL Project**.
+3. Select Part: **Artix-7** $\rightarrow$ **xc7a35tcpg236-1** (or Boards $\rightarrow$ **Basys 3**).
+4. Add Design Sources:
+   - Select `vga_sync.v`.
+5. Add Constraints:
+   - Select `cons.xdc`.
+6. Click **Run Synthesis** $\rightarrow$ **Run Implementation**.
+7. Click **Generate Bitstream**.
+8. Connect your Basys 3 board via micro-USB and open **Hardware Manager**.
+9. Click **Auto Connect**, select `xc7a35t`, and click **Program Device** with the `.bit` file.
+10. Connect a standard 15-pin VGA cable to your monitor and enjoy the arcade game!
+
+---
+
+## 📜 License
 
 This project is licensed under the [MIT License](LICENSE).
